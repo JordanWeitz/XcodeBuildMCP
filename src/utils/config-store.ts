@@ -65,6 +65,7 @@ type ConfigStoreState = {
   fs?: FileSystemExecutor;
   overrides?: RuntimeConfigOverrides;
   fileConfig?: ProjectConfig;
+  env?: NodeJS.ProcessEnv;
   resolved: ResolvedRuntimeConfig;
 };
 
@@ -365,6 +366,7 @@ function refreshResolvedSessionFields(): void {
   storeState.resolved.sessionDefaults = resolveSessionDefaults({
     overrides: storeState.overrides,
     fileConfig: storeState.fileConfig,
+    env: storeState.env,
   });
   storeState.resolved.sessionDefaultsProfiles = resolveSessionDefaultsProfiles({
     overrides: storeState.overrides,
@@ -576,6 +578,7 @@ export async function initConfigStore(opts: {
   storeState.cwd = opts.cwd;
   storeState.fs = opts.fs;
   storeState.overrides = opts.overrides;
+  storeState.env = opts.env;
 
   let fileConfig: ProjectConfig | undefined;
   let found = false;
@@ -676,5 +679,6 @@ export function __resetConfigStoreForTests(): void {
   storeState.fs = undefined;
   storeState.overrides = undefined;
   storeState.fileConfig = undefined;
+  storeState.env = undefined;
   storeState.resolved = { ...DEFAULT_CONFIG };
 }

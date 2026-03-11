@@ -1,6 +1,4 @@
 import type { Argv } from 'yargs';
-import { promises as fs } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as clack from '@clack/prompts';
 import { getDefaultCommandExecutor, getDefaultFileSystemExecutor } from '../../utils/command.ts';
@@ -543,8 +541,12 @@ function parseXctraceDevices(output: string): SetupDevice[] {
   return listed;
 }
 
-async function listAvailableDevices(executor: CommandExecutor): Promise<SetupDevice[]> {
-  const jsonPath = path.join(tmpdir(), `xcodebuildmcp-setup-devices-${Date.now()}.json`);
+async function listAvailableDevices(
+  executor: CommandExecutor,
+  fs: FileSystemExecutor,
+): Promise<SetupDevice[]> {
+  const tmpDir = await fs.mkdtemp(path.join(fs.tmpdir(), 'xcodebuildmcp-setup-devices-'));
+  const jsonPath = path.join(tmpDir, 'devices.json');
 
   try {
     const result = await executor(
@@ -564,7 +566,7 @@ async function listAvailableDevices(executor: CommandExecutor): Promise<SetupDev
   } catch {
     // Fall back to xctrace below.
   } finally {
-    await fs.unlink(jsonPath).catch(() => {});
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 
   const fallbackResult = await executor(
@@ -595,6 +597,7 @@ function getDefaultDeviceIndex(devices: SetupDevice[], existingDeviceId?: string
 async function selectDevice(opts: {
   existingDeviceId?: string;
   executor: CommandExecutor;
+  fs: FileSystemExecutor;
   prompter: Prompter;
   isTTY: boolean;
   quietOutput: boolean;
@@ -604,7 +607,7 @@ async function selectDevice(opts: {
     quietOutput: opts.quietOutput,
     startMessage: 'Loading devices...',
     stopMessage: 'Devices loaded.',
-    task: () => listAvailableDevices(opts.executor),
+    task: () => listAvailableDevices(opts.executor, opts.fs),
   });
 
   if (devices.length === 0) {
@@ -725,6 +728,7 @@ async function collectSetupSelection(
     ? await selectDevice({
         existingDeviceId: existing.deviceId,
         executor: deps.executor,
+        fs: deps.fs,
         prompter: deps.prompter,
         isTTY,
         quietOutput: deps.quietOutput,

@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
@@ -7,35 +6,31 @@ import {
   createMockFileSystemExecutor,
 } from '../../../test-utils/mock-executors.ts';
 import type { CommandExecutor } from '../../../utils/CommandExecutor.ts';
+import type { FileSystemExecutor } from '../../../utils/FileSystemExecutor.ts';
 import type { Prompter } from '../../interactive/prompts.ts';
 import { runSetupWizard } from '../setup.ts';
 
 const cwd = '/repo';
 const configPath = path.join(cwd, '.xcodebuildmcp', 'config.yaml');
 
-async function writeMockDeviceList(jsonPath: string): Promise<void> {
-  await fs.writeFile(
-    jsonPath,
-    JSON.stringify({
-      result: {
-        devices: [
-          {
-            identifier: 'DEVICE-1',
-            visibilityClass: 'Default',
-            connectionProperties: {
-              pairingState: 'paired',
-              tunnelState: 'connected',
-            },
-            deviceProperties: {
-              name: 'Cam iPhone',
-              platformIdentifier: 'com.apple.platform.iphoneos',
-            },
-          },
-        ],
+const mockDeviceListJson = JSON.stringify({
+  result: {
+    devices: [
+      {
+        identifier: 'DEVICE-1',
+        visibilityClass: 'Default',
+        connectionProperties: {
+          pairingState: 'paired',
+          tunnelState: 'connected',
+        },
+        deviceProperties: {
+          name: 'Cam iPhone',
+          platformIdentifier: 'com.apple.platform.iphoneos',
+        },
       },
-    }),
-  );
-}
+    ],
+  },
+});
 
 function createTestPrompter(): Prompter {
   return {
@@ -72,6 +67,7 @@ describe('setup command', () => {
 
   it('exports a setup wizard that writes config selections', async () => {
     let storedConfig = '';
+    const deviceListFiles = new Map<string, string>();
 
     const fs = createMockFileSystemExecutor({
       existsSync: (targetPath) => targetPath === configPath && storedConfig.length > 0,
@@ -90,22 +86,31 @@ describe('setup command', () => {
         return [];
       },
       readFile: async (targetPath) => {
-        if (targetPath !== configPath) {
-          throw new Error(`Unexpected read path: ${targetPath}`);
+        if (targetPath === configPath) {
+          return storedConfig;
         }
-        return storedConfig;
+        if (deviceListFiles.has(targetPath)) {
+          return deviceListFiles.get(targetPath)!;
+        }
+        throw new Error(`Unexpected read path: ${targetPath}`);
       },
       writeFile: async (targetPath, content) => {
-        if (targetPath !== configPath) {
-          throw new Error(`Unexpected write path: ${targetPath}`);
+        if (targetPath === configPath) {
+          storedConfig = content;
+          return;
         }
-        storedConfig = content;
+        deviceListFiles.set(targetPath, content);
       },
+      mkdtemp: async (prefix: string) => {
+        return `${prefix}123456`;
+      },
+      tmpdir: () => '/tmp',
+      rm: async () => {},
     });
 
     const executor: CommandExecutor = async (command) => {
       if (command[0] === 'xcrun' && command[1] === 'devicectl') {
-        await writeMockDeviceList(command[5]);
+        await fs.writeFile(command[5], mockDeviceListJson);
         return createMockCommandResponse({
           success: true,
           output: '',
@@ -172,6 +177,7 @@ describe('setup command', () => {
   it('shows debug-gated workflows when existing config enables debug', async () => {
     let storedConfig = 'schemaVersion: 1\ndebug: true\n';
     let offeredWorkflowIds: string[] = [];
+    const deviceListFiles = new Map<string, string>();
 
     const fs = createMockFileSystemExecutor({
       existsSync: (targetPath) => targetPath === configPath && storedConfig.length > 0,
@@ -190,22 +196,31 @@ describe('setup command', () => {
         return [];
       },
       readFile: async (targetPath) => {
-        if (targetPath !== configPath) {
-          throw new Error(`Unexpected read path: ${targetPath}`);
+        if (targetPath === configPath) {
+          return storedConfig;
         }
-        return storedConfig;
+        if (deviceListFiles.has(targetPath)) {
+          return deviceListFiles.get(targetPath)!;
+        }
+        throw new Error(`Unexpected read path: ${targetPath}`);
       },
       writeFile: async (targetPath, content) => {
-        if (targetPath !== configPath) {
-          throw new Error(`Unexpected write path: ${targetPath}`);
+        if (targetPath === configPath) {
+          storedConfig = content;
+          return;
         }
-        storedConfig = content;
+        deviceListFiles.set(targetPath, content);
       },
+      mkdtemp: async (prefix: string) => {
+        return `${prefix}123456`;
+      },
+      tmpdir: () => '/tmp',
+      rm: async () => {},
     });
 
     const executor: CommandExecutor = async (command) => {
       if (command[0] === 'xcrun' && command[1] === 'devicectl') {
-        await writeMockDeviceList(command[5]);
+        await fs.writeFile(command[5], mockDeviceListJson);
         return createMockCommandResponse({
           success: true,
           output: '',
@@ -297,6 +312,8 @@ describe('setup command', () => {
   });
 
   it('outputs MCP config JSON when format is mcp-json', async () => {
+    const deviceListFiles = new Map<string, string>();
+
     const fs = createMockFileSystemExecutor({
       existsSync: () => false,
       stat: async () => ({ isDirectory: () => true, mtimeMs: 0 }),
@@ -313,13 +330,25 @@ describe('setup command', () => {
 
         return [];
       },
-      readFile: async () => '',
-      writeFile: async () => {},
+      readFile: async (targetPath) => {
+        if (deviceListFiles.has(targetPath)) {
+          return deviceListFiles.get(targetPath)!;
+        }
+        return '';
+      },
+      writeFile: async (targetPath, content) => {
+        deviceListFiles.set(targetPath, content);
+      },
+      mkdtemp: async (prefix: string) => {
+        return `${prefix}123456`;
+      },
+      tmpdir: () => '/tmp',
+      rm: async () => {},
     });
 
     const executor: CommandExecutor = async (command) => {
       if (command[0] === 'xcrun' && command[1] === 'devicectl') {
-        await writeMockDeviceList(command[5]);
+        await fs.writeFile(command[5], mockDeviceListJson);
         return createMockCommandResponse({
           success: true,
           output: '',
@@ -474,6 +503,8 @@ describe('setup command', () => {
   });
 
   it('collects a device default without requiring simulator selection when only device-dependent workflows are enabled', async () => {
+    const deviceListFiles = new Map<string, string>();
+
     const fs = createMockFileSystemExecutor({
       existsSync: () => false,
       stat: async () => ({ isDirectory: () => true, mtimeMs: 0 }),
@@ -490,8 +521,20 @@ describe('setup command', () => {
 
         return [];
       },
-      readFile: async () => '',
-      writeFile: async () => {},
+      readFile: async (targetPath) => {
+        if (deviceListFiles.has(targetPath)) {
+          return deviceListFiles.get(targetPath)!;
+        }
+        return '';
+      },
+      writeFile: async (targetPath, content) => {
+        deviceListFiles.set(targetPath, content);
+      },
+      mkdtemp: async (prefix: string) => {
+        return `${prefix}123456`;
+      },
+      tmpdir: () => '/tmp',
+      rm: async () => {},
     });
 
     const executor: CommandExecutor = async (command) => {
@@ -500,7 +543,7 @@ describe('setup command', () => {
       }
 
       if (command[0] === 'xcrun' && command[1] === 'devicectl') {
-        await writeMockDeviceList(command[5]);
+        await fs.writeFile(command[5], mockDeviceListJson);
         return createMockCommandResponse({
           success: true,
           output: '',
