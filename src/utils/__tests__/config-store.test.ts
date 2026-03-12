@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { createMockFileSystemExecutor } from '../../test-utils/mock-executors.ts';
 import {
@@ -196,6 +196,45 @@ describe('config-store', () => {
 
     expect(getConfig().activeSessionDefaultsProfile).toBe('ios');
     expect(writes).toHaveLength(1);
+  });
+
+  it('hydrates MCP session defaults without persisting resolved simulator metadata back to config', async () => {
+    const writes: { path: string; content: string }[] = [];
+    const fs = createMockFileSystemExecutor({
+      existsSync: () => true,
+      readFile: async () =>
+        ['schemaVersion: 1', 'sessionDefaults:', '  simulatorName: "iPhone 17"', ''].join('\n'),
+      writeFile: async (targetPath, content) => {
+        writes.push({ path: targetPath, content });
+      },
+    });
+
+    vi.useFakeTimers();
+
+    const executor = {
+      execute: vi.fn().mockResolvedValue({
+        stdout: JSON.stringify({
+          devices: {
+            'iOS 18.0': [
+              {
+                name: 'iPhone 17',
+                udid: 'SIM-UUID',
+                isAvailable: true,
+              },
+            ],
+          },
+        }),
+        stderr: '',
+        code: 0,
+      }),
+    };
+
+    const { bootstrapRuntime } = await import('../../runtime/bootstrap-runtime.ts');
+    await bootstrapRuntime({ runtime: 'mcp', cwd, fs });
+    await vi.runAllTimersAsync();
+
+    expect(writes).toHaveLength(0);
+    expect(getConfig().sessionDefaults?.simulatorId).toBeUndefined();
   });
 
   it('normalizes profile names for persisted defaults patch and resolved config', async () => {
